@@ -201,7 +201,7 @@ const KINDS={
   walker:{hp:2, sp:80,  r:36, bite:1,  skin:'#7BC043', shirt:'#4A5A6A', pts:1},
   runner:{hp:1, sp:170, r:31, bite:1,  skin:'#A8E063', shirt:'#6A4A5A', pts:1},
   brute: {hp:14,sp:55,  r:50, bite:3,  skin:'#4F8A2B', shirt:'#3A3A3A', pts:3},
-  boss:  {hp:0, sp:36,  r:84, bite:6, skin:'#2E5E1A', shirt:'#552222', pts:15},
+  boss:  {hp:0, sp:30,  r:84, bite:6, skin:'#2E5E1A', shirt:'#552222', pts:15},
 };
 function spawnZombie(kind, lane, y){
   const k=kind||pickKind(), b=KINDS[k];
@@ -210,7 +210,7 @@ function spawnZombie(kind, lane, y){
   const z={ kind:k, lane:L, x:LANE_X[L]+rnd(-LANE_W*0.36, LANE_W*0.36), y:y ?? -70, r:b.r, sp:b.sp*(0.9+Math.min(0.6,(S.dist/500)*0.12)),
             bite:b.bite, skin:b.skin, shirt:b.shirt, pts:b.pts, wob:rnd(0,6.28), flash:0 };
   if (k==='boss') z.x=LANE_X[L];
-  z.hp = k==='boss' ? Math.round(180*scale*scale) : Math.round(b.hp*scale);
+  z.hp = k==='boss' ? Math.round(120*scale*scale) : Math.round(b.hp*scale);
   z.maxhp=z.hp; S.zombies.push(z);
 }
 function pickKind(){
@@ -299,7 +299,7 @@ function update(dt){
 
   if (scrolling && S.dist>=S.nextHorde){
     S.nextHorde+=350;
-    const n=6+Math.floor(S.dist/60)+Math.floor(S.soldiers/5);
+    const n=6+Math.floor(S.dist/70)+Math.floor(S.soldiers/6);
     S.horde={left:n,total:n,spawnT:0}; toast('HORDE!',1300);
   }
   if (scrolling && S.dist>=S.nextBoss){ S.nextBoss+=700; spawnZombie('boss', Math.random()<0.5?0:1, -110); toast('BOSS',1300); }
@@ -371,20 +371,23 @@ function update(dt){
   for (const z of S.zombies){
     if (!z.latched){
       z.y+=z.sp*dt+scroll*0.55;
-      if (z.y>=lineY-z.r){ z.y=lineY-z.r; z.latched=true; z.biteT=0.35; }
+      if (z.y>=lineY-z.r){ z.y=lineY-z.r; z.latched=true; z.biteT=0.6; z.side=z.x<S.px?-1:1; z.slot=rnd(0,26); }
     } else {
       // at the line: close in on the squad along the line and bite
-      const dxz=S.px-z.x; const gap=z.r+20;
-      if (Math.abs(dxz)>gap) z.x+=Math.sign(dxz)*Math.min(Math.abs(dxz)-gap, z.sp*1.3*dt);
+      const gap=z.r+18+z.slot; const tx=S.px+z.side*gap, ty=S.py-6;
+      const dxz=tx-z.x, dyz=ty-z.y; const stepm=z.sp*1.2*dt;
+      if (Math.abs(dxz)>2) z.x+=Math.sign(dxz)*Math.min(Math.abs(dxz), stepm);
+      if (Math.abs(dyz)>2) z.y+=Math.sign(dyz)*Math.min(Math.abs(dyz), stepm);
+      if (z.x<ROAD_L()+z.r*0.5 || z.x>ROAD_R()-z.r*0.5) z.side*=-1;
       z.biteT-=dt;
-      if (z.biteT<=0 && Math.abs(dxz)<=gap+6){ z.biteT=z.kind==='boss'?0.6:0.9; S.soldiers-=z.bite; S.shake=0.18; puff(S.px,S.py,'#D6453D',10,180); toast('-'+z.bite,500);
+      if (z.biteT<=0 && Math.abs(dxz)<=14 && Math.abs(dyz)<=14){ z.biteT=z.kind==='boss'?0.6:0.9; S.soldiers-=z.bite; S.shake=0.18; puff(S.px,S.py,'#D6453D',10,180); toast('-'+z.bite,500);
         if (S.soldiers<=0){ S.soldiers=0; updateHUD(); gameOver(); return; } }
     }
     z.wob+=dt*(z.kind==='runner'?14:8);
     z.flash=Math.max(0,z.flash-dt);
     for (const b of S.bullets){
-      if (!b.dead && Math.hypot(b.x-z.x,b.y-z.y)<z.r+6){
-        b.dead=true; z.hp-=b.dmg; z.flash=0.07; S.fx.push({x:b.x,y:b.y,vx:rnd(-40,40),vy:rnd(-90,-30),life:0.2,col:'#CFF3A0',r:3});
+      if (!b.dead && (!z.latched || z.kind==='boss') && Math.hypot(b.x-z.x,b.y-z.y)<z.r+6){
+        b.dead=true; z.hp-=z.latched?b.dmg*0.35:b.dmg; z.flash=0.07; S.fx.push({x:b.x,y:b.y,vx:rnd(-40,40),vy:rnd(-90,-30),life:0.2,col:'#CFF3A0',r:3});
       }
     }
     if (z.hp<=0 && !z.dead){
@@ -395,7 +398,7 @@ function update(dt){
     if (z.y>H+80) z.dead=true;
   }
   // squad melee: zombies clinging to the line right in front of the squad get hit by the whole squad
-  for (const z of S.zombies){ if (z.latched && !z.dead && Math.abs(z.x-S.px)<z.r+26){ z.hp-=(2+S.soldiers/30)*dt*4; z.flash=0.04; if (z.hp<=0){ z.dead=true; S.kills++; puff(z.x,z.y,z.skin,10,160); if(z.kind==='boss'){S.bosses++; toast('BOSS POPPED',1200); S.shake=0.35;} } } }
+  for (const z of S.zombies){ if (z.latched && !z.dead && Math.abs(z.x-S.px)<z.r+60){ z.hp-=(0.8+S.soldiers/25)*dt; z.flash=0.04; if (z.hp<=0){ z.dead=true; S.kills++; puff(z.x,z.y,z.skin,10,160); if(z.kind==='boss'){S.bosses++; toast('BOSS POPPED',1200); S.shake=0.35;} } } }
   S.zombies=S.zombies.filter(z=>!z.dead);
 
   for (const f of S.fx){ f.x+=f.vx*dt; f.y+=f.vy*dt; f.vy+=320*dt; f.life-=dt; }
