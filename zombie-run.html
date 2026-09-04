@@ -60,12 +60,12 @@
 <div id="overlay">
   <div class="card" id="card">
     <h1 id="cardTitle">ZOMBIE <span>RUN</span></h1>
-    <p id="cardText">Two lanes. Tap a side, swipe, or use the arrow keys to switch. Your squad fires on its own.</p>
+    <p id="cardText">Move with the mouse, drag on a tablet, or use the arrow keys. Your squad fires on its own. Zombies that reach your line will bite until you drop them.</p>
     <div class="howto" id="howto">
       <div class="g"><b>Green gates</b> add or multiply your soldiers. Shoot a gate to grow its number before you reach it.</div>
       <div class="r"><b>Red gates</b> subtract or divide. Pick the lane with the better math.</div>
       <div class="c"><b>Break the crate</b> in your lane to grab the weapon inside.</div>
-      <div class="y"><b>Hordes</b> stop the road. Switch lanes and hold the line.</div>
+      <div class="y"><b>Hold the line.</b> Anything that reaches it attacks your soldiers. Zero soldiers and the run is over.</div>
     </div>
     <div class="big" id="cardScore" hidden></div>
     <button id="btn">START RUN</button>
@@ -168,48 +168,49 @@ const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 function reset(){
   S.running=false; S.over=false; S.t=0; S.dist=0; S.kills=0; S.bosses=0;
   S.soldiers=CFG.soldiers||5; S.weapon=CFG.weapon||0; S.crateHits=0;
-  S.lane=0; S.px=LANE_X[0]; S.py=H-170;
+  S.lane=0; S.px=LANE_X[0]; S.tx=LANE_X[0]; S.py=H-170;
   S.speed=230;
   S.bullets=[]; S.zombies=[]; S.gates=[]; S.crates=[]; S.fx=[]; S.debris=[];
   S.fireT=0; S.spawnT=1.4; S.gateT=4.5; S.crateT=6.5;
-  S.horde=null; S.nextHorde=400; S.nextBoss=750;
+  S.horde=null; S.nextHorde=400; S.nextBoss=900;
   S.shake=0; S.lineY=0; S.step=0; S.scenery=[]; S.sceneT=0; S.flash=0;
   updateHUD(); drawHudWeapon(S.weapon);
 }
 
-// ---------- input: two lanes ----------
-function setLane(l){ S.lane = clamp(l,0,1); }
+// ---------- input: free movement across the road ----------
+// Mouse: the squad follows the cursor. Touch: drag or tap where you want to go. Keys: hold to slide, tap to step.
+const ROAD_L=()=>44, ROAD_R=()=>W-44;
+function setTarget(x){ S.tx=clamp(x,ROAD_L(),ROAD_R()); }
 const keys={};
 window.addEventListener('keydown', e=>{
-  if (e.key==='ArrowLeft'||e.key==='a'||e.key==='A') setLane(0);
-  if (e.key==='ArrowRight'||e.key==='d'||e.key==='D') setLane(1);
+  if (e.key==='ArrowLeft'||e.key==='a'||e.key==='A'){ if(!keys.L){ setTarget((S.tx??S.px)-46); } keys.L=true; }
+  if (e.key==='ArrowRight'||e.key==='d'||e.key==='D'){ if(!keys.R){ setTarget((S.tx??S.px)+46); } keys.R=true; }
   if (e.key===' ' && !S.running && !overlay.hidden) start();
 });
-let downX=null;
-cv.addEventListener('pointerdown', e=>{ downX=e.clientX; });
-cv.addEventListener('pointerup', e=>{
-  if (downX===null) return;
-  const dx=e.clientX-downX; downX=null;
-  if (Math.abs(dx)>24) setLane(dx<0?0:1);
-  else { const r=cv.getBoundingClientRect(); setLane((e.clientX-r.left) < W/2 ? 0 : 1); }
-});
-cv.addEventListener('pointercancel', ()=>downX=null);
+window.addEventListener('keyup', e=>{ if (e.key==='ArrowLeft'||e.key==='a'||e.key==='A') keys.L=false; if (e.key==='ArrowRight'||e.key==='d'||e.key==='D') keys.R=false; });
+const toRoad=e=>{ const r=cv.getBoundingClientRect(); return (e.clientX-r.left)*W/r.width; };
+let dragging=false;
+cv.addEventListener('pointerdown', e=>{ dragging=true; setTarget(toRoad(e)); });
+cv.addEventListener('pointermove', e=>{ if (e.pointerType==='mouse' || dragging) setTarget(toRoad(e)); });
+cv.addEventListener('pointerup', ()=>dragging=false);
+cv.addEventListener('pointercancel', ()=>dragging=false);
+cv.addEventListener('mouseleave', ()=>dragging=false);
 
 // ---------- spawning ----------
 const KINDS={
-  walker:{hp:2, sp:75,  r:30, bite:1,  skin:'#7BC043', shirt:'#4A5A6A', pts:1},
-  runner:{hp:1, sp:165, r:26, bite:1,  skin:'#A8E063', shirt:'#6A4A5A', pts:1},
-  brute: {hp:10,sp:52,  r:42, bite:3,  skin:'#4F8A2B', shirt:'#3A3A3A', pts:3},
-  boss:  {hp:0, sp:34,  r:70, bite:12, skin:'#2E5E1A', shirt:'#552222', pts:15},
+  walker:{hp:2, sp:75,  r:36, bite:1,  skin:'#7BC043', shirt:'#4A5A6A', pts:1},
+  runner:{hp:1, sp:165, r:31, bite:1,  skin:'#A8E063', shirt:'#6A4A5A', pts:1},
+  brute: {hp:10,sp:52,  r:50, bite:3,  skin:'#4F8A2B', shirt:'#3A3A3A', pts:3},
+  boss:  {hp:0, sp:34,  r:84, bite:8, skin:'#2E5E1A', shirt:'#552222', pts:15},
 };
 function spawnZombie(kind, lane, y){
   const k=kind||pickKind(), b=KINDS[k];
   const scale=1+S.dist/1200;
   const L = lane ?? (Math.random()<0.5?0:1);
-  const z={ kind:k, lane:L, x:LANE_X[L]+rnd(-LANE_W*0.28, LANE_W*0.28), y:y ?? -70, r:b.r, sp:b.sp*(0.9+scale*0.1),
+  const z={ kind:k, lane:L, x:LANE_X[L]+rnd(-LANE_W*0.36, LANE_W*0.36), y:y ?? -70, r:b.r, sp:b.sp*(0.9+scale*0.1),
             bite:b.bite, skin:b.skin, shirt:b.shirt, pts:b.pts, wob:rnd(0,6.28), flash:0 };
   if (k==='boss') z.x=LANE_X[L];
-  z.hp = k==='boss' ? Math.round(90*scale + S.soldiers*4) : Math.round(b.hp*scale);
+  z.hp = k==='boss' ? Math.round(140*scale*scale) : Math.round(b.hp*scale);
   z.maxhp=z.hp; S.zombies.push(z);
 }
 function pickKind(){
@@ -255,7 +256,7 @@ function applyGate(g){
   else if (g.op==='x') S.soldiers*=g.n;
   else if (g.op==='-') S.soldiers-=g.n;
   else S.soldiers=Math.ceil(S.soldiers/g.n);
-  S.soldiers=clamp(Math.round(S.soldiers),0,999);
+  S.soldiers=clamp(Math.round(S.soldiers),0,9999);
   const diff=S.soldiers-before;
   toast((diff>=0?'+':'')+diff+' SOLDIERS', 800);
   puff(g.x, S.py, diff>=0?'#7BC043':'#D6453D', 22);
@@ -283,7 +284,9 @@ function start(){ reset(); overlay.hidden=true; S.running=true; try{ parent.post
 // ---------- update ----------
 function update(dt){
   S.t+=dt; S.py=H-170;
-  S.px += (LANE_X[S.lane]-S.px)*Math.min(1,dt*12);
+  if (keys.L) setTarget(S.tx-420*dt); if (keys.R) setTarget(S.tx+420*dt);
+  const dx=S.tx-S.px; S.px += Math.sign(dx)*Math.min(Math.abs(dx), 520*dt);
+  S.lane = S.px < W/2 ? 0 : 1;
   const scrolling=!S.horde;
   const scroll=scrolling?S.speed*dt:0;
   if (scrolling){ S.dist+=scroll/10; S.lineY=(S.lineY+scroll)%80; S.step+=dt*9; }
@@ -298,7 +301,7 @@ function update(dt){
     const n=16+Math.floor(S.dist/60)+Math.floor(S.soldiers/4);
     S.horde={left:n,total:n,spawnT:0}; toast('HORDE!',1300);
   }
-  if (scrolling && S.dist>=S.nextBoss){ S.nextBoss+=800; spawnZombie('boss', Math.random()<0.5?0:1, -110); toast('BOSS',1300); }
+  if (scrolling && S.dist>=S.nextBoss){ S.nextBoss+=1000; spawnZombie('boss', Math.random()<0.5?0:1, -110); toast('BOSS',1300); }
   if (S.horde){
     S.horde.spawnT-=dt;
     if (S.horde.left>0 && S.horde.spawnT<=0){
@@ -316,23 +319,24 @@ function update(dt){
   S.fireT-=dt; const w=WEAPONS[S.weapon];
   if (S.fireT<=0){
     S.fireT=w.rate; S.flash=0.05;
-    const guns=clamp(Math.ceil(Math.sqrt(S.soldiers)),1,6);
-    const spreadW=Math.min(LANE_W*0.6, 14+S.soldiers*2.2);
+    const guns=clamp(Math.ceil(Math.sqrt(S.soldiers)),1,8);
+    const power=1+S.soldiers/30;                       // every 30 soldiers adds a full extra squad of damage
+    const spreadW=Math.min(LANE_W*0.7, 14+S.soldiers*2.2);
     for(let g=0;g<guns;g++){
       const ox=guns===1?0:-spreadW/2+spreadW*g/(guns-1);
       for(let s=0;s<w.shots;s++){
         const a=-Math.PI/2+(w.shots>1?(-w.spread/2+w.spread*s/(w.shots-1)):rnd(-w.spread,w.spread));
-        S.bullets.push({x:S.px+ox,y:S.py-30,vx:Math.cos(a)*w.speed,vy:Math.sin(a)*w.speed,dmg:w.dmg,col:w.color,w:w.w,lane:S.lane});
+        S.bullets.push({x:S.px+ox,y:S.py-30,vx:Math.cos(a)*w.speed,vy:Math.sin(a)*w.speed,dmg:w.dmg*power,col:w.color,w:w.w+Math.min(4,S.soldiers/60),lane:(S.px+ox)<W/2?0:1});
       }
     }
   }
   for (const b of S.bullets){ b.x+=b.vx*dt; b.y+=b.vy*dt; }
-  S.bullets=S.bullets.filter(b=>b.y>-30 && !b.dead && Math.abs(b.x-LANE_X[b.lane])<LANE_W/2);
+  S.bullets=S.bullets.filter(b=>b.y>-30 && !b.dead && b.x>0 && b.x<W);
 
   for (const g of S.gates){
     g.y+=scroll; g.hitT=Math.max(0,g.hitT-dt);
     for (const b of S.bullets){
-      if (!b.dead && b.lane===g.lane && !b.gates?.has(g) && Math.abs(b.y-g.y)<g.h/2){
+      if (!b.dead && Math.abs(b.x-g.x)<g.w/2 && !b.gates?.has(g) && Math.abs(b.y-g.y)<g.h/2){
         (b.gates||(b.gates=new Set())).add(g); g.hitT=0.1; g.acc+=b.dmg;
         if (g.op==='+' && g.acc>=4){ g.acc=0; g.n++; }
         else if (g.op==='x' && g.acc>=16){ g.acc=0; g.n=Math.min(g.n+1,5); }
@@ -349,7 +353,7 @@ function update(dt){
   for (const c of S.crates){
     c.y+=scroll; c.wob=Math.max(0,c.wob-dt*6);
     for (const b of S.bullets){
-      if (!b.dead && b.lane===c.lane && Math.hypot(b.x-c.x,b.y-c.y)<c.r+6){
+      if (!b.dead && Math.hypot(b.x-c.x,b.y-c.y)<c.r+6){
         b.dead=true; c.hp-=b.dmg; c.wob=1; S.crateHits=Math.min(c.maxhp,c.maxhp-c.hp);
         S.fx.push({x:b.x,y:b.y,vx:rnd(-60,60),vy:rnd(-120,-40),life:0.35,col:'#E6B86A',r:3});
       }
@@ -362,11 +366,23 @@ function update(dt){
   }
   S.crates=S.crates.filter(c=>!c.done);
 
+  const lineY=S.py-10;
   for (const z of S.zombies){
-    z.y+=z.sp*dt+scroll*0.55; z.wob+=dt*(z.kind==='runner'?14:8);
+    if (!z.latched){
+      z.y+=z.sp*dt+scroll*0.55;
+      if (z.y>=lineY-z.r){ z.y=lineY-z.r; z.latched=true; z.biteT=0.35; }
+    } else {
+      // at the line: close in on the squad along the line and bite
+      const dxz=S.px-z.x; const gap=z.r+20;
+      if (Math.abs(dxz)>gap) z.x+=Math.sign(dxz)*Math.min(Math.abs(dxz)-gap, z.sp*1.3*dt);
+      z.biteT-=dt;
+      if (z.biteT<=0 && Math.abs(dxz)<=gap+6){ z.biteT=z.kind==='boss'?0.6:0.9; S.soldiers-=z.bite; S.shake=0.18; puff(S.px,S.py,'#D6453D',10,180); toast('-'+z.bite,500);
+        if (S.soldiers<=0){ S.soldiers=0; updateHUD(); gameOver(); return; } }
+    }
+    z.wob+=dt*(z.kind==='runner'?14:8);
     z.flash=Math.max(0,z.flash-dt);
     for (const b of S.bullets){
-      if (!b.dead && b.lane===z.lane && Math.hypot(b.x-z.x,b.y-z.y)<z.r+4){
+      if (!b.dead && Math.hypot(b.x-z.x,b.y-z.y)<z.r+6){
         b.dead=true; z.hp-=b.dmg; z.flash=0.07; S.fx.push({x:b.x,y:b.y,vx:rnd(-40,40),vy:rnd(-90,-30),life:0.2,col:'#CFF3A0',r:3});
       }
     }
@@ -375,12 +391,10 @@ function update(dt){
       puff(z.x,z.y,z.skin,z.kind==='boss'?48:12,z.kind==='boss'?320:180);
       if (z.kind==='boss'){ S.bosses++; toast('BOSS POPPED',1200); S.shake=0.35; }
     }
-    if (!z.dead && z.lane===S.lane && z.y>S.py-z.r-10){
-      z.dead=true; S.soldiers-=z.bite; S.shake=0.18; puff(S.px,S.py,'#D6453D',14,200);
-      if (S.soldiers<=0){ S.soldiers=0; updateHUD(); gameOver(); return; }
-    }
     if (z.y>H+80) z.dead=true;
   }
+  // squad melee: zombies clinging to the line right in front of the squad get hit by the whole squad
+  for (const z of S.zombies){ if (z.latched && !z.dead && Math.abs(z.x-S.px)<z.r+26){ z.hp-=(2+S.soldiers/15)*dt*4; z.flash=0.04; if (z.hp<=0){ z.dead=true; S.kills++; puff(z.x,z.y,z.skin,10,160); if(z.kind==='boss'){S.bosses++; toast('BOSS POPPED',1200); S.shake=0.35;} } } }
   S.zombies=S.zombies.filter(z=>!z.dead);
 
   for (const f of S.fx){ f.x+=f.vx*dt; f.y+=f.vy*dt; f.vy+=320*dt; f.life-=dt; }
@@ -395,7 +409,7 @@ function update(dt){
 function outlineRect(x,y,w,h,fill,stroke='#0E1013',lw=2){ ctx.fillStyle=fill; ctx.fillRect(x,y,w,h); ctx.strokeStyle=stroke; ctx.lineWidth=lw; ctx.strokeRect(x,y,w,h); }
 function drawSoldier(x,y,i){
   const step=Math.sin(S.step+i*1.7), moving=!S.horde;
-  ctx.save(); ctx.translate(x,y); ctx.scale(1.45,1.45); ctx.lineJoin='round';
+  ctx.save(); ctx.translate(x,y); ctx.scale(1.7,1.7); ctx.lineJoin='round';
   ctx.fillStyle='rgba(0,0,0,.4)'; ctx.beginPath(); ctx.ellipse(0,21,14,5,0,0,6.28); ctx.fill();
   // legs + boots
   outlineRect(-8, 8+(moving?step*3:0), 7, 12, '#3B4A57'); outlineRect(1, 8-(moving?step*3:0), 7, 12, '#3B4A57');
@@ -522,12 +536,14 @@ function draw(){
   for (const c of S.crates) drawCrate(c);
   for (const b of S.bullets){ ctx.strokeStyle='rgba(255,255,255,.35)'; ctx.lineWidth=b.w+4; ctx.lineCap='round'; ctx.beginPath(); ctx.moveTo(b.x,b.y); ctx.lineTo(b.x-b.vx*0.03,b.y-b.vy*0.03); ctx.stroke(); ctx.strokeStyle=b.col; ctx.lineWidth=b.w; ctx.beginPath(); ctx.moveTo(b.x,b.y); ctx.lineTo(b.x-b.vx*0.025,b.y-b.vy*0.025); ctx.stroke(); ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(b.x,b.y,b.w*0.6,0,6.28); ctx.fill(); }
   S.zombies.slice().sort((a,b)=>a.y-b.y).forEach(drawZombie);
-  const n=Math.min(S.soldiers,12), cols=Math.min(n,4), rows=Math.ceil(n/cols);
+  // defensive line
+  ctx.fillStyle='rgba(242,201,76,.25)'; ctx.fillRect(30,S.py-14,W-60,3);
+  const n=Math.min(S.soldiers,15), cols=Math.min(n,5), rows=Math.ceil(n/cols);
   for(let i=n-1;i>=0;i--){
     const r=Math.floor(i/cols), c=i%cols, rowN=(r===rows-1)?(n-r*cols):cols;
-    drawSoldier(S.px+(c-(rowN-1)/2)*42, S.py+r*42, i);
+    drawSoldier(S.px+(c-(rowN-1)/2)*44, S.py+r*46, i);
   }
-  if (S.soldiers>12){ ctx.fillStyle='#F2C94C'; ctx.font='24px Bangers, Impact, sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('+'+(S.soldiers-12)+' more', S.px, S.py+rows*42+20); }
+  if (S.soldiers>15){ ctx.fillStyle='#F2C94C'; ctx.font='26px Bangers, Impact, sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.shadowColor='#000'; ctx.shadowOffsetX=2; ctx.shadowOffsetY=2; ctx.fillText('+'+(S.soldiers-15)+' more', S.px, S.py+rows*46+22); ctx.shadowColor='transparent'; }
   for (const d of S.debris){ ctx.save(); ctx.translate(d.x,d.y); ctx.rotate(d.rot); ctx.fillStyle='#C98A3E'; ctx.fillRect(-d.w/2,-d.h/2,d.w,d.h); ctx.restore(); }
   for (const f of S.fx){
     ctx.globalAlpha=Math.min(1,f.life*3); ctx.fillStyle=f.col;
